@@ -2,9 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDownToLine, ArrowLeftRight, BookOpen, CalendarDays, Check, CheckCircle2, ChevronDown,
   CircleAlert, Clock3, DoorOpen, Download, FileDown, GraduationCap, Info, Layers3, LayoutDashboard,
-  LoaderCircle, Menu, Pencil, Plus, Printer, RotateCcw, Search, Settings2, Sparkles, Trash2, Upload, Users,
-  UserRound, X,
+  LoaderCircle, LogOut, Menu, Pencil, Plus, Printer, RotateCcw, Search, Settings2, ShieldCheck, Sparkles,
+  Trash2, Upload, Users, UserRound, X,
 } from 'lucide-react'
+import type { Session } from '@supabase/supabase-js'
+import AuthScreen, { type AuthMode } from './AuthScreen'
+import { supabase, supabaseConfigured } from './supabase'
 import {
   blankData, csvCell, DAYS, DEFAULT_PREFERENCES, generateSchedule, minutes, newId, requiredSessions,
   timeLabel, validateSchedule,
@@ -98,6 +101,34 @@ function exportFile(name: string, content: string, type: string): void {
   link.download = name
   link.click()
   URL.revokeObjectURL(url)
+}
+
+function isPlannerData(value: unknown): value is PlannerData {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<PlannerData>
+  return Array.isArray(candidate.groups) && Array.isArray(candidate.subjects) &&
+    Array.isArray(candidate.faculty) && Array.isArray(candidate.rooms) &&
+    Array.isArray(candidate.windows) && Array.isArray(candidate.schedule)
+}
+
+function friendlyAuthError(reason: unknown): string {
+  const detail = reason instanceof Error ? reason.message : 'Please try again.'
+  const normalized = detail.toLowerCase()
+  if (normalized.includes('already registered') || normalized.includes('already exists')) {
+    return 'An account with this email already exists. Sign in instead.'
+  }
+  if (normalized.includes('invalid login credentials')) return 'Email or password is incorrect.'
+  if (normalized.includes('email not confirmed')) return 'Verify your email address using the link we sent, then sign in.'
+  if (normalized.includes('password')) return 'Password was not accepted. Use at least 8 characters and try again.'
+  return `Authentication could not be completed. ${detail}`
+}
+
+function initialAuthMode(): AuthMode {
+  try {
+    return localStorage.getItem('relations-timetable-account-created-v1') === 'true' ? 'login' : 'signup'
+  } catch {
+    return 'signup'
+  }
 }
 
 function Button({ children, onClick, variant = 'secondary', disabled = false, title, className = '', type = 'button' }: {
@@ -275,7 +306,16 @@ function App() {
   const [search, setSearch] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
-  const [loaded, setLoaded] = useState(false)
+  const [cloudError, setCloudError] = useState('')
+  const [authReady, setAuthReady] = useState(false)
+  const [session, setSession] = useState<Session | null>(null)
+  const [authInitialMode, setAuthInitialMode] = useState<AuthMode>(initialAuthMode)
+  const [authError, setAuthError] = useState('')
+  const [authNotice, setAuthNotice] = useState('')
+  const [authLoading, setAuthLoading] = useState(false)
+  const [loadedForUser, setLoadedForUser] = useState('')
+  const [loadAttempt, setLoadAttempt] = useState(0)
+  const [saveStatus, setSaveStatus] = useState<'saving' | 'saved' | 'error'>('saved')
   const [isGenerating, setIsGenerating] = useState(false)
   const [mobileNav, setMobileNav] = useState(false)
   const [undoStack, setUndoStack] = useState<TimetableSnapshot[]>([])
@@ -283,33 +323,167 @@ function App() {
   const [viewMode, setViewMode] = useState<'weekly' | 'daily' | 'class' | 'faculty' | 'room' | 'department'>('weekly')
   const importRef = useRef<HTMLInputElement>(null)
   const dataRef = useRef(data)
+  const userId = session?.user.id ?? ''
 
   useEffect(() => { dataRef.current = data }, [data])
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('relations-timetable-data-v1')
-      if (saved) {
-        const parsed = JSON.parse(saved) as PlannerData
-        if (Array.isArray(parsed.groups) && Array.isArray(parsed.subjects) && Array.isArray(parsed.faculty) &&
-            Array.isArray(parsed.rooms) && Array.isArray(parsed.windows) && Array.isArray(parsed.schedule)) setData(parsed)
-        else setError('Saved browser data could not be recognized. It has not been replaced.')
-      }
-    } catch {
-      setError('Saved browser data could not be read. Exported backups are not affected.')
-    } finally {
-      setLoaded(true)
+    if (!supabase) {
+      setAuthReady(true)
+      return
+    }
+
+    let active = true
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession)
+      setAuthError('')
+      setAuthNotice('')
+    })
+    void supabase.auth.getSession().then(({ data: authData, error: sessionError }) => {
+      if (!active) return
+      if (sessionError) setAuthError(friendlyAuthError(sessionError))
+      else setSession(authData.session)
+      setAuthReady(true)
+    }).catch((reason: unknown) => {
+      if (!active) return
+      setAuthError(friendlyAuthError(reason))
+      setAuthReady(true)
+    })
+
+    return () => {
+      active = false
+      subscription.unsubscribe()
     }
   }, [])
 
   useEffect(() => {
-    if (!loaded) return
-    try {
-      localStorage.setItem('relations-timetable-data-v1', JSON.stringify(data))
-    } catch {
-      setError('Could not save to this browser. Export a JSON backup and check available browser storage.')
+    if (!userId) {
+      setData(blankData())
+      setLoadedForUser('')
+      setCloudError('')
+      return
     }
-  }, [data, loaded])
+    if (!supabase) return
+
+    let active = true
+    const client = supabase
+    setLoadedForUser('')
+    setData(blankData())
+    setCloudError('')
+    void (async () => {
+      const { data: saved, error: readError } = await client
+        .from('planner_data')
+        .select('data')
+        .eq('user_id', userId)
+        .maybeSingle()
+      if (!active) return
+      if (readError) {
+        setCloudError(`Could not load your account data. ${readError.message}`)
+        return
+      }
+      if (saved && !isPlannerData(saved.data)) {
+        setCloudError('Your saved timetable data has an unexpected format. It was left unchanged.')
+        return
+      }
+      const restored = saved ? saved.data as PlannerData : blankData()
+      setData({ ...restored, preferences: { ...DEFAULT_PREFERENCES, ...restored.preferences } })
+      setLoadedForUser(userId)
+    })().catch((reason: unknown) => {
+      if (active) setCloudError(`Could not load your account data. ${reason instanceof Error ? reason.message : 'Please try again.'}`)
+    })
+
+    return () => { active = false }
+  }, [userId, loadAttempt])
+
+  useEffect(() => {
+    if (!supabase || !userId || loadedForUser !== userId) return
+    const client = supabase
+    const snapshot = data
+    const timer = window.setTimeout(() => {
+      setSaveStatus('saving')
+      void (async () => {
+        try {
+          const { error: saveError } = await client.from('planner_data').upsert(
+            { user_id: userId, data: snapshot, updated_at: new Date().toISOString() },
+            { onConflict: 'user_id' },
+          )
+          if (saveError) {
+            setCloudError(`Could not save your timetable to your account. ${saveError.message}`)
+            setSaveStatus('error')
+            return
+          }
+          setCloudError('')
+          setSaveStatus('saved')
+        } catch (reason) {
+          setCloudError(`Could not save your timetable to your account. ${reason instanceof Error ? reason.message : 'Please try again.'}`)
+          setSaveStatus('error')
+        }
+      })
+    }, 500)
+    return () => window.clearTimeout(timer)
+  }, [data, loadedForUser, userId])
+
+  const authenticate = async (mode: AuthMode, fullName: string, email: string, password: string): Promise<boolean> => {
+    if (!supabase) return false
+    setAuthLoading(true)
+    setAuthError('')
+    setAuthNotice('')
+    try {
+      if (mode === 'signup') {
+        const { data: result, error: signupError } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: { full_name: fullName },
+            emailRedirectTo: `${window.location.origin}${window.location.pathname}`,
+          },
+        })
+        if (signupError) throw signupError
+        if (!result.session) {
+          setAuthNotice('Your account was created. Check your email and confirm the address before signing in.')
+        }
+      } else {
+        const { error: signinError } = await supabase.auth.signInWithPassword({ email, password })
+        if (signinError) throw signinError
+      }
+      setAuthInitialMode('login')
+      try {
+        localStorage.setItem('relations-timetable-account-created-v1', 'true')
+      } catch {
+        if (mode === 'login') setAuthNotice('You are signed in, but this browser could not remember your account for next time.')
+      }
+      return true
+    } catch (reason) {
+      setAuthError(friendlyAuthError(reason))
+      return false
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  const signOut = async () => {
+    if (!supabase) return
+    setAuthLoading(true)
+    setAuthError('')
+    try {
+      const { error: signoutError } = await supabase.auth.signOut()
+      if (signoutError) {
+        setCloudError(`Could not sign out safely. ${signoutError.message}`)
+        return
+      }
+      setSession(null)
+      setAuthInitialMode('login')
+      setData(blankData())
+      setLoadedForUser('')
+      setError('')
+      setCloudError('')
+      setMessage('')
+    } catch (reason) {
+      setCloudError(`Could not sign out safely. ${reason instanceof Error ? reason.message : 'Please try again.'}`)
+    } finally {
+      setAuthLoading(false)
+    }
+  }
 
   const conflicts = useMemo(() => validateSchedule(data.schedule, data), [data.schedule, data])
   const mandatoryConflicts = conflicts.length
@@ -480,18 +654,36 @@ function App() {
       `Classrooms: ${data.rooms.length}`,
       `Available time windows: ${data.windows.filter(item => !item.isBreak).length}`,
       '',
-      'This summary reflects only the data saved in this browser at the time of export.',
+      'This summary reflects the account data at the time of export.',
     ].join('\r\n')
     exportFile('scheduling-summary.txt', content, 'text/plain;charset=utf-8')
   }
   const saveNow = () => {
-    try {
-      localStorage.setItem('relations-timetable-data-v1', JSON.stringify(data))
-      setError('')
-      setMessage('Changes saved in this browser.')
-    } catch {
-      setError('Could not save to this browser. Export a JSON backup and check available browser storage.')
+    if (!supabase || !userId || loadedForUser !== userId) {
+      setCloudError('Your timetable is not ready to save yet. Please wait for your account data to finish loading.')
+      return
     }
+    const client = supabase
+    setSaveStatus('saving')
+    void (async () => {
+      try {
+        const { error: saveError } = await client.from('planner_data').upsert(
+          { user_id: userId, data, updated_at: new Date().toISOString() },
+          { onConflict: 'user_id' },
+        )
+        if (saveError) {
+          setSaveStatus('error')
+          setCloudError(`Could not save your timetable to your account. ${saveError.message}`)
+          return
+        }
+        setSaveStatus('saved')
+        setCloudError('')
+        setMessage('Your timetable was saved to your account.')
+      } catch (reason) {
+        setSaveStatus('error')
+        setCloudError(`Could not save your timetable to your account. ${reason instanceof Error ? reason.message : 'Please try again.'}`)
+      }
+    })
   }
   const importData = async (file: File | undefined) => {
     if (!file) return
@@ -514,11 +706,11 @@ function App() {
     }
   }
   const reset = () => {
-    if (!window.confirm('Permanently reset all data saved in this browser? Export a backup first if you need it.')) return
+    if (!window.confirm('Permanently reset all timetable data saved to your account? Export a backup first if you need it.')) return
     setData(blankData())
     setUndoStack([])
     setError('')
-    setMessage('Project data reset in this browser.')
+    setMessage('Your account timetable was reset.')
   }
 
   const openEditor = (kind: EntityKind, value?: Entity) => setEditing({ kind, draft: value ? draftFrom(kind, value) : emptyDraft(kind, data) })
@@ -561,10 +753,32 @@ function App() {
     return `${value.label || 'Custom time window'} · ${timeLabel(value.start)}–${timeLabel(value.end)} · ${value.isBreak ? 'Break / lunch' : 'Available period'}`
   }
 
+  if (!authReady) return <AuthLoadingScreen message="Checking your sign-in…" />
+  if (!session) return <AuthScreen
+    configured={supabaseConfigured}
+    initialMode={authInitialMode}
+    error={authError}
+    notice={authNotice}
+    loading={authLoading}
+    onSubmit={authenticate}
+    onModeChange={() => { setAuthError(''); setAuthNotice('') }}
+  />
+  if (cloudError && loadedForUser !== userId) return <AuthLoadingScreen
+    message="Your timetable could not be loaded."
+    error={cloudError}
+    onRetry={() => { setCloudError(''); setLoadAttempt(value => value + 1) }}
+    onSignOut={() => void signOut()}
+  />
+  if (loadedForUser !== userId) return <AuthLoadingScreen message="Loading your private timetable…" />
+
+  const displayUserName = typeof session.user.user_metadata.full_name === 'string'
+    ? session.user.user_metadata.full_name
+    : session.user.email ?? 'Account'
+
   return <div className="app-shell">
     <aside className={`sidebar ${mobileNav ? 'sidebar-open' : ''}`}>
       <div className="brand"><div className="brand-mark"><CalendarDays size={21} /></div><div><strong>Relations</strong><small>Timetable Studio</small></div><button className="icon-button nav-close" onClick={() => setMobileNav(false)} aria-label="Close navigation"><X size={18} /></button></div>
-      <div className="workspace-badge"><span className="status-dot" />Personal workspace</div>
+      <div className="workspace-badge"><span className="status-dot" />Private account workspace</div>
       {['Workspace', 'Planning', 'Learn'].map(group => <nav className="nav-group" key={group} aria-label={group}>
         <p className="nav-label">{group}</p>
         {NAV_ITEMS.filter(item => item.group === group).map(item => {
@@ -572,13 +786,14 @@ function App() {
           return <button key={item.id} className={`nav-item ${page === item.id ? 'nav-active' : ''}`} onClick={() => { setPage(item.id); setSearch(''); setMobileNav(false) }}><Icon size={17} strokeWidth={1.8} /><span>{PAGE_LABELS[item.id]}</span>{item.id === 'conflicts' && conflicts.length > 0 && <span className="nav-count">{conflicts.length}</span>}</button>
         })}
       </nav>)}
-      <div className="sidebar-bottom"><div className="browser-note"><span className="mini-icon"><Check size={15} /></span><div><b>Saved in this browser</b><small>Your data stays on this device</small></div></div><button className="nav-item" onClick={() => setPage('about')}><Info size={17} />About this project</button></div>
+      <div className="sidebar-bottom"><div className="browser-note"><span className="mini-icon"><ShieldCheck size={15} /></span><div><b>Saved to your account</b><small>Your timetable is private</small></div></div><button className="nav-item" onClick={() => setPage('about')}><Info size={17} />About this project</button></div>
     </aside>
     {mobileNav && <button className="mobile-scrim" aria-label="Close menu" onClick={() => setMobileNav(false)} />}
     <main className="main-area">
-      <header className="topbar"><button className="icon-button mobile-menu" aria-label="Open menu" onClick={() => setMobileNav(true)}><Menu size={20} /></button><div className="breadcrumbs"><span>Relations Studio</span><ChevronDown size={14} /><strong>{titleCasePage}</strong></div><div className="topbar-actions"><span className="autosave"><span className="status-dot" />Local autosave</span><Button variant="quiet" onClick={() => importRef.current?.click()}><Upload size={16} />Import data</Button><input ref={importRef} type="file" accept="application/json,.json" hidden onChange={event => void importData(event.target.files?.[0])} /></div></header>
+      <header className="topbar"><button className="icon-button mobile-menu" aria-label="Open menu" onClick={() => setMobileNav(true)}><Menu size={20} /></button><div className="breadcrumbs"><span>Relations Studio</span><ChevronDown size={14} /><strong>{titleCasePage}</strong></div><div className="topbar-actions"><span className="account-label" title={session.user.email}>{displayUserName}</span><span className={`autosave ${saveStatus === 'error' ? 'autosave-error' : ''}`}><span className="status-dot" />{saveStatus === 'saving' ? 'Saving…' : saveStatus === 'error' ? 'Save failed' : 'Account synced'}</span><Button variant="quiet" disabled={authLoading} onClick={() => void signOut()}><LogOut size={15} />Sign out</Button><Button variant="quiet" onClick={() => importRef.current?.click()}><Upload size={16} />Import data</Button><input ref={importRef} type="file" accept="application/json,.json" hidden onChange={event => void importData(event.target.files?.[0])} /></div></header>
       <div className="page-wrap">
         {error && <div className="alert alert-error"><CircleAlert size={18} /><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss"><X size={17} /></button></div>}
+        {cloudError && <div className="alert alert-error"><CircleAlert size={18} /><span>{cloudError}</span><button onClick={() => setCloudError('')} aria-label="Dismiss"><X size={17} /></button></div>}
         {message && <div className="alert alert-success"><CheckCircle2 size={18} /><span>{message}</span><button onClick={() => setMessage('')} aria-label="Dismiss"><X size={17} /></button></div>}
         {page === 'dashboard' && <Dashboard data={data} stats={stats} conflicts={conflicts} onGo={setPage} onGenerate={runGeneration} />}
         {kind && <section>
@@ -609,6 +824,21 @@ function EntityIcon({ kind }: { kind: EntityKind }) {
 
 function EmptyState({ icon, title, text, action }: { icon: React.ReactNode; title: string; text: string; action?: React.ReactNode }) {
   return <div className="empty-state"><div className="empty-icon">{icon}</div><h3>{title}</h3><p>{text}</p>{action}</div>
+}
+
+function AuthLoadingScreen({ message, error, onRetry, onSignOut }: {
+  message: string
+  error?: string
+  onRetry?: () => void
+  onSignOut?: () => void
+}) {
+  return <main className="auth-page"><section className="auth-card auth-status-card">
+    <div className="auth-brand"><span className="brand-mark"><CalendarDays size={21} /></span><div><strong>Relations</strong><small>Timetable Studio</small></div></div>
+    <h1>{error ? 'We could not open your workspace' : message}</h1>
+    {error ? <div className="auth-message auth-error" role="alert"><CircleAlert size={17} /><span>{error}</span></div> : <LoaderCircle size={25} className="auth-loader spin" aria-label={message} />}
+    {onRetry && <button type="button" className="auth-submit" onClick={onRetry}>Retry loading</button>}
+    {onSignOut && <button type="button" className="auth-secondary" onClick={onSignOut}>Sign out</button>}
+  </section></main>
 }
 
 function Dashboard({ data, stats, conflicts, onGo, onGenerate }: {
@@ -768,7 +998,7 @@ function AboutPage({ data, onExport, onImport, onReset }: { data: PlannerData; o
     ['Proposed Solution', 'A browser-based planner that models scheduling entities and their relations, then searches for an assignment satisfying all mandatory constraints.'],
     ['Mathematical Foundation', 'Sets describe subjects, faculty, rooms, time windows, groups, and sessions. Relations model eligibility and requirements; logical predicates test assignments.'],
     ['Algorithm', 'A backtracking constraint search prioritizes sessions with fewer eligible assignments and validates a complete candidate schedule before showing success.'],
-    ['Advantages', 'User-managed scheduling data, explicit conflict explanations, editable sessions, reusable browser storage, and CSV/print-ready timetable output.'],
+    ['Advantages', 'Private account-specific scheduling data, explicit conflict explanations, editable sessions, and CSV/print-ready timetable output.'],
     ['Limitations & Future Enhancements', 'Data is local to this browser. Future work could add shared accounts, a database-backed service, richer optimization preferences, and integrations with institutional systems.'],
   ]
   return <section><div className="page-heading"><div><span className="eyebrow">PROJECT OVERVIEW</span><h1>About the Project</h1><p>Scheduling as a practical application of relations and constraint satisfaction.</p></div><div className="project-stamp"><GraduationCap size={19} />Capstone project</div></div>

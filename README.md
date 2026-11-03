@@ -22,11 +22,25 @@ Publishing makes the site reachable by its public link; it does not guarantee im
 
 1. Install Node.js (version 20 or newer).
 2. In this folder, run `npm install`.
-3. Run `npm run dev` and open `https://localhost:5173/`.
+3. Create a Supabase project. In its SQL Editor, run the contents of [`supabase/schema.sql`](./supabase/schema.sql) to create the account-isolated planner table and row-level security policies.
+4. Copy `.env.example` to `.env.local`. In Supabase **Project Settings → API**, copy the Project URL and the anon/public key into `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
+5. In Supabase **Authentication → URL Configuration**, set the Site URL to your local site and add your local URL and deployed GitHub Pages URL to the redirect allow list. Keep email/password authentication enabled.
+6. Run `npm run dev` and open `https://localhost:5173/`.
 
 The development server uses a generated self-signed HTTPS certificate. Your browser may show a certificate warning because this certificate is only for local development.
 
-Your data is stored in the current browser's local storage. It is not shared between browsers, devices, or users. Use **Export data** to save a portable JSON backup and **Import data** to restore one.
+Sign up with your name, email, and password. If email confirmation is enabled in Supabase, confirm the address from the message sent to your inbox before signing in. The app uses Supabase Auth JWT sessions and clears the sign-in when the browser tab is closed. Sign out to return to the login page immediately.
+
+Planner data is saved to Supabase under the signed-in account. The SQL policies restrict each account to its own data. Use **Export data** to save a portable JSON backup and **Import data** to restore one.
+
+### Configure GitHub Pages authentication
+
+Before deploying, open the repository's **Settings → Secrets and variables → Actions** and add these repository secrets:
+
+- `VITE_SUPABASE_URL` — the Supabase Project URL.
+- `VITE_SUPABASE_ANON_KEY` — the Supabase anon/public key.
+
+The GitHub Actions workflow checks these values and stops with a clear setup message if either is missing. The anon/public key is intended for browser use and is protected by Supabase authentication and row-level security. **Never add a Supabase service-role key to this frontend or to GitHub Pages.**
 
 ## Scheduling model
 
@@ -34,4 +48,4 @@ Add your own groups, subjects, faculty, classrooms, and day-specific time window
 
 ## Limitations
 
-The app runs entirely in the current browser and does not synchronize data. Timetable PDF output uses the browser's print dialog (choose **Save as PDF**). The project brief was supplied without a presentation file, so the academic explanations follow the terminology in the brief and do not claim real-world test results.
+The authentication and account-specific cloud storage require a configured Supabase project. Timetable PDF output uses the browser's print dialog (choose **Save as PDF**). The project brief was supplied without a presentation file, so the academic explanations follow the terminology in the brief and do not claim real-world test results.
