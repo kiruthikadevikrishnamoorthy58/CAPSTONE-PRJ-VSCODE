@@ -307,6 +307,7 @@ function EntryEditor({ entry, data, onClose, onSave }: {
 function App() {
   const [data, setData] = useState<PlannerData>(() => blankData())
   const [page, setPage] = useState<Page>('dashboard')
+  const [accountSettingsOpen, setAccountSettingsOpen] = useState(false)
   const [editing, setEditing] = useState<{ kind: EntityKind; draft: Draft } | null>(null)
   const [entryEditing, setEntryEditing] = useState<ScheduleEntry | null>(null)
   const [addSession, setAddSession] = useState(false)
@@ -490,6 +491,30 @@ function App() {
       return false
     } finally {
       setAuthLoading(false)
+    }
+  }
+
+  const updateSchoolName = async (schoolName: string): Promise<string | null> => {
+    if (!supabase || schoolName.length < 2) return 'Enter a college or school name with at least 2 characters.'
+    try {
+      const { data: result, error: updateError } = await supabase.auth.updateUser({ data: { school_name: schoolName } })
+      if (updateError) return friendlyAuthError(updateError)
+      setSession(current => current ? { ...current, user: result.user } : current)
+      return null
+    } catch (reason) {
+      return friendlyAuthError(reason)
+    }
+  }
+
+  const updatePassword = async (password: string): Promise<string | null> => {
+    if (!supabase) return 'The account service is unavailable. Please try again later.'
+    if (password.length < 8) return 'Use at least 8 characters for your new password.'
+    try {
+      const { error: updateError } = await supabase.auth.updateUser({ password })
+      if (updateError) return friendlyAuthError(updateError)
+      return null
+    } catch (reason) {
+      return friendlyAuthError(reason)
     }
   }
 
@@ -804,8 +829,11 @@ function App() {
   />
   if (loadedForUser !== userId) return <AuthLoadingScreen message="Loading your private timetable…" />
 
-  const displayUserName = typeof session.user.user_metadata.school_name === 'string'
+  const schoolName = typeof session.user.user_metadata.school_name === 'string'
     ? session.user.user_metadata.school_name
+    : ''
+  const displayUserName = schoolName
+    ? schoolName
     : typeof session.user.user_metadata.full_name === 'string'
       ? session.user.user_metadata.full_name
       : session.user.email ?? 'Account'
@@ -825,7 +853,7 @@ function App() {
     </aside>
     {mobileNav && <button className="mobile-scrim" aria-label="Close menu" onClick={() => setMobileNav(false)} />}
     <main className="main-area">
-      <header className="topbar"><button className="icon-button mobile-menu" aria-label="Open menu" onClick={() => setMobileNav(true)}><Menu size={20} /></button><div className="breadcrumbs"><span>Relations Studio</span><ChevronDown size={14} /><strong>{titleCasePage}</strong></div><div className="topbar-actions"><span className="account-label" title={session.user.email}>{displayUserName}</span><span className={`autosave ${saveStatus === 'error' ? 'autosave-error' : ''}`}><span className="status-dot" />{saveStatus === 'saving' ? 'Saving…' : saveStatus === 'error' ? 'Save failed' : 'Account synced'}</span><Button variant="quiet" disabled={authLoading} onClick={() => void signOut()}><LogOut size={15} />Sign out</Button><Button variant="quiet" onClick={() => importRef.current?.click()}><Upload size={16} />Import data</Button><input ref={importRef} type="file" accept="application/json,.json" hidden onChange={event => void importData(event.target.files?.[0])} /></div></header>
+      <header className="topbar"><button className="icon-button mobile-menu" aria-label="Open menu" onClick={() => setMobileNav(true)}><Menu size={20} /></button><div className="breadcrumbs"><span>Relations Studio</span><ChevronDown size={14} /><strong>{titleCasePage}</strong></div><div className="topbar-actions"><span className="account-label" title={session.user.email}>{displayUserName}</span><span className={`autosave ${saveStatus === 'error' ? 'autosave-error' : ''}`}><span className="status-dot" />{saveStatus === 'saving' ? 'Saving…' : saveStatus === 'error' ? 'Save failed' : 'Account synced'}</span><Button variant="quiet" onClick={() => setAccountSettingsOpen(true)}><Settings2 size={15} />Account</Button><Button variant="quiet" disabled={authLoading} onClick={() => void signOut()}><LogOut size={15} />Sign out</Button><Button variant="quiet" onClick={() => importRef.current?.click()}><Upload size={16} />Import data</Button><input ref={importRef} type="file" accept="application/json,.json" hidden onChange={event => void importData(event.target.files?.[0])} /></div></header>
       <div className="page-wrap">
         {error && <div className="alert alert-error"><CircleAlert size={18} /><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss"><X size={17} /></button></div>}
         {cloudError && <div className="alert alert-error"><CircleAlert size={18} /><span>{cloudError}</span><button onClick={() => setCloudError('')} aria-label="Dismiss"><X size={17} /></button></div>}
@@ -849,6 +877,13 @@ function App() {
     {editing && <EntityEditor kind={editing.kind} draft={editing.draft} data={data} isEditing={Boolean(itemsForPage(({ group: 'groups', faculty: 'faculty', subject: 'subjects', room: 'rooms', window: 'windows' } as const)[editing.kind]).some(item => item.id === editing.draft.id))} onSave={draft => saveEntity(editing.kind, draft)} onClose={() => setEditing(null)} />}
     {entryEditing && <EntryEditor entry={entryEditing} data={data} onClose={() => setEntryEditing(null)} onSave={addOrUpdateEntry} />}
     {addSession && <AddSessionModal data={data} onClose={() => setAddSession(false)} onAdd={saveEntryAddition} />}
+    {accountSettingsOpen && <AccountSettingsModal
+      schoolName={schoolName}
+      email={session.user.email ?? ''}
+      onClose={() => setAccountSettingsOpen(false)}
+      onSaveSchoolName={updateSchoolName}
+      onChangePassword={updatePassword}
+    />}
   </div>
 }
 
@@ -961,6 +996,81 @@ function TimetablePage({ data, filters, setFilters, viewMode, setViewMode, entri
     })}</div>)}</div></div> : <EmptyState icon={<CalendarDays size={21} />} title={entries.length === 0 && data.schedule.length ? 'No sessions match these filters' : 'No timetable to display'} text={data.schedule.length ? 'Adjust the filters or add a session.' : 'Add classes, subjects, faculty, rooms, and time windows, then generate your timetable.'} action={!data.schedule.length ? <Button variant="primary" onClick={() => setViewMode('weekly')}><Sparkles size={16} />Start planning</Button> : undefined} />}
     <div className="table-bottom-actions"><span>{entries.length} visible session{entries.length === 1 ? '' : 's'} · {requiredSessions(data).length} required</span><button className="text-link" onClick={() => setFilters({ groupId: '', facultyId: '', subjectId: '', roomId: '', day: '', department: '', year: '' })}>Clear filters</button></div>
   </section>
+}
+
+function AccountSettingsModal({ schoolName, email, onClose, onSaveSchoolName, onChangePassword }: {
+  schoolName: string
+  email: string
+  onClose: () => void
+  onSaveSchoolName: (schoolName: string) => Promise<string | null>
+  onChangePassword: (password: string) => Promise<string | null>
+}) {
+  const [name, setName] = useState(schoolName)
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [profileError, setProfileError] = useState('')
+  const [profileNotice, setProfileNotice] = useState('')
+  const [passwordError, setPasswordError] = useState('')
+  const [passwordNotice, setPasswordNotice] = useState('')
+  const [savingProfile, setSavingProfile] = useState(false)
+  const [savingPassword, setSavingPassword] = useState(false)
+
+  const saveProfile = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setProfileError('')
+    setProfileNotice('')
+    setSavingProfile(true)
+    const result = await onSaveSchoolName(name.trim())
+    setSavingProfile(false)
+    if (result) setProfileError(result)
+    else setProfileNotice('College / school name updated.')
+  }
+
+  const changePassword = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setPasswordError('')
+    setPasswordNotice('')
+    if (newPassword !== confirmPassword) {
+      setPasswordError('The passwords do not match.')
+      return
+    }
+    if (newPassword.length < 8) {
+      setPasswordError('Use at least 8 characters for your new password.')
+      return
+    }
+    setSavingPassword(true)
+    const result = await onChangePassword(newPassword)
+    setSavingPassword(false)
+    if (result) setPasswordError(result)
+    else {
+      setNewPassword('')
+      setConfirmPassword('')
+      setPasswordNotice('Relations Studio password updated.')
+    }
+  }
+
+  return <div className="modal-backdrop" role="presentation">
+    <section className="modal account-settings-modal" role="dialog" aria-modal="true" aria-labelledby="account-settings-title">
+      <div className="modal-heading"><div><span className="eyebrow">YOUR ACCOUNT</span><h2 id="account-settings-title">Account settings</h2></div><button className="icon-button" onClick={onClose} aria-label="Close account settings"><X size={19} /></button></div>
+      <form className="account-settings-form" onSubmit={saveProfile}>
+        <h3>College / school details</h3>
+        <FormField label="College / school name"><input value={name} onChange={event => setName(event.target.value)} minLength={2} maxLength={160} required autoComplete="organization" /></FormField>
+        <FormField label="College / school email ID"><input type="email" value={email} readOnly disabled /></FormField>
+        {profileError && <div className="form-error" role="alert">{profileError}</div>}
+        {profileNotice && <div className="account-success" role="status">{profileNotice}</div>}
+        <div className="modal-actions"><Button type="submit" variant="primary" disabled={savingProfile || name.trim().length < 2}>{savingProfile ? 'Saving…' : 'Save name'}</Button></div>
+      </form>
+      <form className="account-settings-form" onSubmit={event => void changePassword(event)}>
+        <h3>Change Relations Studio password</h3>
+        <p className="subtle-note">Choose a password for this website only. You do not need to enter your school email password.</p>
+        <FormField label="New password"><input type="password" value={newPassword} onChange={event => setNewPassword(event.target.value)} minLength={8} maxLength={72} autoComplete="new-password" required /></FormField>
+        <FormField label="Confirm new password"><input type="password" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} minLength={8} maxLength={72} autoComplete="new-password" required /></FormField>
+        {passwordError && <div className="form-error" role="alert">{passwordError}</div>}
+        {passwordNotice && <div className="account-success" role="status">{passwordNotice}</div>}
+        <div className="modal-actions"><Button type="submit" variant="primary" disabled={savingPassword || newPassword.length < 8 || confirmPassword.length < 8}>{savingPassword ? 'Updating…' : 'Update password'}</Button></div>
+      </form>
+    </section>
+  </div>
 }
 
 function AddSessionModal({ data, onClose, onAdd }: { data: PlannerData; onClose: () => void; onAdd: (groupId: string, subjectId: string, facultyId: string, roomId: string, windowId: string) => void }) {

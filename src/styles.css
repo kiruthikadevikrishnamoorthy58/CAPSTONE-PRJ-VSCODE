@@ -444,6 +444,12 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 3px s
 .auth-loader { margin: 20px auto; color: #756add; }
 .auth-status-card .auth-message { text-align: left; margin-top: 16px; }
 .auth-secondary { margin-top: 9px; min-height: 39px; width: 100%; border: 1px solid #e8e7f0; border-radius: 9px; color: #5c5b76; background: #fff; font-size: 11px; font-weight: 650; }
+.account-settings-form + .account-settings-form { margin-top: 22px; padding-top: 20px; border-top: 1px solid #f0eef5; }
+.account-settings-form h3 { margin: 0 0 13px; color: #45445e; font-size: 13px; }
+.account-settings-form .field { margin-top: 12px; }
+.account-settings-form .field input:disabled { color: #85849a; background: #f8f8fc; }
+.account-settings-form .subtle-note { margin: -4px 0 12px; }
+.account-success { margin-top: 12px; padding: 9px 11px; border: 1px solid #d8f0e1; border-radius: 9px; color: #408466; background: #eff9f3; font-size: 10px; }
 .account-label { max-width: 150px; overflow: hidden; color: #65647d; font-size: 10px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .autosave-error { color: #a94f54; }
 .autosave-error .status-dot { background: #d27575; box-shadow: 0 0 0 3px #fff0f0; }

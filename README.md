@@ -33,6 +33,8 @@ Sign up with your college/school name, college/school email, and a password crea
 
 Planner data is saved to Supabase under the signed-in account. The SQL policies restrict each account to its own data. Use **Export data** to save a portable JSON backup and **Import data** to restore one.
 
+After signing in, use **Account** in the top bar to update your college/school name or change your Relations Studio password. Your college/school email is shown but cannot be changed here.
+
 ### Configure GitHub Pages authentication
 
 Before deploying, open the repository's **Settings → Secrets and variables → Actions** and add these repository secrets:
