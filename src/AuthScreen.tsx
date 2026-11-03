@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { CalendarDays, CircleAlert, LoaderCircle, LockKeyhole, Mail, ShieldCheck } from 'lucide-react'
+import { CalendarDays, Check, CircleAlert, GraduationCap, LoaderCircle, LockKeyhole, Mail, ShieldCheck, Sparkles } from 'lucide-react'
 
 export type AuthMode = 'signup' | 'login'
 
@@ -44,6 +44,17 @@ export default function AuthScreen({ configured, initialMode, error, notice, loa
   }
 
   return <main className="auth-page">
+    <div className="auth-visual" aria-label="College campus">
+      <img src="https://images.unsplash.com/photo-1523580494863-6f3031224c94?auto=format&fit=crop&w=1600&q=85" alt="College students celebrating together outdoors" />
+      <div className="auth-visual-shade" />
+      <div className="auth-visual-content">
+        <span className="auth-visual-kicker"><Sparkles size={15} /> YOUR IDEAS. YOUR CAMPUS. YOUR PLAN.</span>
+        <h2>Make room<br />for what’s next.</h2>
+        <p>Bring your classes, faculty, rooms, and time together in one bright, beautifully organized space.</p>
+        <div className="auth-visual-points"><span><Check size={15} />Plan your week</span><span><Check size={15} />Keep your data private</span></div>
+      </div>
+      <div className="auth-campus-tag"><span><GraduationCap size={19} /></span><div><b>Built for campus life</b><small>Your timetable, all in one place</small></div></div>
+    </div>
     <section className="auth-card" aria-labelledby="auth-title">
       <div className="auth-brand"><span className="brand-mark"><CalendarDays size={21} /></span><div><strong>Relations</strong><small>Timetable Studio</small></div></div>
       <span className="eyebrow">{signingUp ? 'YOUR PRIVATE PLANNING SPACE' : 'WELCOME BACK'}</span>
