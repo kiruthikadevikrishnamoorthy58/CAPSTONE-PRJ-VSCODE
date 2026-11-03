@@ -3,31 +3,44 @@ import { CalendarDays, CircleAlert, LoaderCircle, LockKeyhole, Mail, ShieldCheck
 
 export type AuthMode = 'signup' | 'login'
 
-export default function AuthScreen({ configured, initialMode, error, notice, loading, onSubmit, onModeChange }: {
+export default function AuthScreen({ configured, initialMode, error, notice, loading, onSubmit, onResendVerification, onModeChange }: {
   configured: boolean
   initialMode: AuthMode
   error: string
   notice: string
   loading: boolean
-  onSubmit: (mode: AuthMode, fullName: string, email: string, password: string) => Promise<boolean>
+  onSubmit: (mode: AuthMode, schoolName: string, email: string, password: string) => Promise<boolean>
+  onResendVerification: (email: string) => Promise<boolean>
   onModeChange: () => void
 }) {
   const [mode, setMode] = useState<AuthMode>(initialMode)
-  const [fullName, setFullName] = useState('')
+  const [schoolName, setSchoolName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [verificationPending, setVerificationPending] = useState(false)
+  const [resendLoading, setResendLoading] = useState(false)
   const signingUp = mode === 'signup'
 
   const changeMode = () => {
     setMode(signingUp ? 'login' : 'signup')
+    setVerificationPending(false)
     onModeChange()
   }
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    void onSubmit(mode, fullName.trim(), email.trim(), password).then(succeeded => {
-      if (succeeded && signingUp) setMode('login')
+    void onSubmit(mode, schoolName.trim(), email.trim(), password).then(succeeded => {
+      if (succeeded && signingUp) {
+        setMode('login')
+        setVerificationPending(true)
+      }
     })
+  }
+
+  const resendVerification = async () => {
+    setResendLoading(true)
+    await onResendVerification(email.trim())
+    setResendLoading(false)
   }
 
   return <main className="auth-page">
@@ -35,16 +48,16 @@ export default function AuthScreen({ configured, initialMode, error, notice, loa
       <div className="auth-brand"><span className="brand-mark"><CalendarDays size={21} /></span><div><strong>Relations</strong><small>Timetable Studio</small></div></div>
       <span className="eyebrow">{signingUp ? 'YOUR PRIVATE PLANNING SPACE' : 'WELCOME BACK'}</span>
       <h1 id="auth-title">{signingUp ? 'Create your account' : 'Sign in to your account'}</h1>
-      <p className="auth-intro">{signingUp ? 'Sign up once to save your timetable and planning details securely to your account.' : 'Use the email and password you registered with to open your timetable.'}</p>
+      <p className="auth-intro">{signingUp ? 'Create an account with your college or school email to save your timetable securely.' : 'Sign in with your college or school email and Relations Studio password.'}</p>
 
       {error && <div className="auth-message auth-error" role="alert"><CircleAlert size={17} /><span>{error}</span></div>}
-      {notice && <div className="auth-message auth-notice" role="status"><ShieldCheck size={17} /><span>{notice}</span></div>}
+      {notice && <div className="auth-message auth-notice" role="status"><ShieldCheck size={17} /><span>{notice}{verificationPending && <button type="button" className="auth-resend" disabled={resendLoading || loading || !email.trim()} onClick={() => void resendVerification()}>{resendLoading ? 'Sending…' : 'Resend verification email'}</button>}</span></div>}
       {!configured && <div className="auth-setup" role="status"><strong>Finish connecting Supabase</strong><span>Add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> to <code>.env.local</code>, then follow the Supabase setup steps in README. Signup and login will be available once configured.</span></div>}
 
       <form className="auth-form" onSubmit={submit}>
-        {signingUp && <label className="auth-field"><span>Full name</span><input value={fullName} onChange={event => setFullName(event.target.value)} autoComplete="name" placeholder="Your name" minLength={2} maxLength={100} required disabled={!configured || loading} /></label>}
-        <label className="auth-field"><span>Email address</span><div className="auth-input-wrap"><Mail size={17} /><input type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" placeholder="you@example.com" maxLength={254} required disabled={!configured || loading} /></div></label>
-        <label className="auth-field"><span>Password</span><div className="auth-input-wrap"><LockKeyhole size={17} /><input type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete={signingUp ? 'new-password' : 'current-password'} placeholder={signingUp ? 'At least 8 characters' : 'Your password'} minLength={8} maxLength={72} required disabled={!configured || loading} /></div>{signingUp && <small>Use at least 8 characters.</small>}</label>
+        {signingUp && <label className="auth-field"><span>College / school name</span><input value={schoolName} onChange={event => setSchoolName(event.target.value)} autoComplete="organization" placeholder="Your college or school" minLength={2} maxLength={160} required disabled={!configured || loading} /></label>}
+        <label className="auth-field"><span>College / school email ID</span><div className="auth-input-wrap"><Mail size={17} /><input type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" placeholder="you@college.edu" maxLength={254} required disabled={!configured || loading} /></div></label>
+        <label className="auth-field"><span>Relations Studio password</span><div className="auth-input-wrap"><LockKeyhole size={17} /><input type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete={signingUp ? 'new-password' : 'current-password'} placeholder={signingUp ? 'Create a password for this website' : 'Your website password'} minLength={8} maxLength={72} required disabled={!configured || loading} /></div>{signingUp && <small>Create a password just for this website. Never enter your email account password.</small>}</label>
         <button className="auth-submit" type="submit" disabled={!configured || loading}>{loading ? <LoaderCircle size={17} className="spin" /> : <ShieldCheck size={17} />}{loading ? 'Please wait…' : signingUp ? 'Create account' : 'Sign in'}</button>
       </form>
 

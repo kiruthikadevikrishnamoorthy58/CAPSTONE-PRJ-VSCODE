@@ -29,7 +29,7 @@ Publishing makes the site reachable by its public link; it does not guarantee im
 
 The development server uses a generated self-signed HTTPS certificate. Your browser may show a certificate warning because this certificate is only for local development.
 
-Sign up with your name, email, and password. If email confirmation is enabled in Supabase, confirm the address from the message sent to your inbox before signing in. The app uses Supabase Auth JWT sessions and clears the sign-in when the browser tab is closed. Sign out to return to the login page immediately.
+Sign up with your college/school name, college/school email, and a password created specifically for Relations Studio. Never enter your email account password. Confirm the email using the link sent to your inbox before signing in. The app uses Supabase Auth JWT sessions stored for the current browser tab and returns to login after the tab session ends. Sign out to return to login immediately.
 
 Planner data is saved to Supabase under the signed-in account. The SQL policies restrict each account to its own data. Use **Export data** to save a portable JSON backup and **Import data** to restore one.
 
