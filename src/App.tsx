@@ -115,11 +115,18 @@ function friendlyAuthError(reason: unknown): string {
   const detail = reason instanceof Error ? reason.message : 'Please try again.'
   const normalized = detail.toLowerCase()
   if (normalized.includes('already registered') || normalized.includes('already exists')) {
-    return 'An account with this email already exists. Sign in instead.'
+    return 'An account may already exist for this email. Try signing in, or create an account with another email.'
   }
   if (normalized.includes('invalid login credentials')) return 'Email or password is incorrect.'
-  if (normalized.includes('email not confirmed')) return 'Verify your email address using the link we sent, then sign in.'
+  if (normalized.includes('email not confirmed')) return 'Verify your college or school email using the link we sent, then sign in.'
   if (normalized.includes('password')) return 'Password was not accepted. Use at least 8 characters and try again.'
+  if (normalized.includes('rate limit') || normalized.includes('too many requests')) return 'Too many attempts. Wait a few minutes, then try again.'
+  if (normalized.includes('failed to fetch') || normalized.includes('network') || normalized.includes('fetch')) {
+    return 'Could not reach the sign-in service. Check your internet connection and try again.'
+  }
+  if (normalized.includes('signup is disabled') || normalized.includes('signups not allowed')) {
+    return 'New accounts are currently disabled for this site. Please contact the site administrator.'
+  }
   return `Authentication could not be completed. ${detail}`
 }
 
@@ -423,8 +430,9 @@ function App() {
     return () => window.clearTimeout(timer)
   }, [data, loadedForUser, userId])
 
-  const authenticate = async (mode: AuthMode, fullName: string, email: string, password: string): Promise<boolean> => {
+  const authenticate = async (mode: AuthMode, schoolName: string, emailAddress: string, password: string): Promise<boolean> => {
     if (!supabase) return false
+    const email = emailAddress.trim().toLowerCase()
     setAuthLoading(true)
     setAuthError('')
     setAuthNotice('')
@@ -434,13 +442,13 @@ function App() {
           email,
           password,
           options: {
-            data: { full_name: fullName },
+            data: { school_name: schoolName },
             emailRedirectTo: `${window.location.origin}${window.location.pathname}`,
           },
         })
         if (signupError) throw signupError
         if (!result.session) {
-          setAuthNotice('Your account was created. Check your email and confirm the address before signing in.')
+          setAuthNotice('Account request received. Open the verification link sent to your college or school inbox, then return here to sign in. Check your spam folder if it is missing.')
         }
       } else {
         const { error: signinError } = await supabase.auth.signInWithPassword({ email, password })
@@ -452,6 +460,30 @@ function App() {
       } catch {
         if (mode === 'login') setAuthNotice('You are signed in, but this browser could not remember your account for next time.')
       }
+      return true
+    } catch (reason) {
+      setAuthError(friendlyAuthError(reason))
+      return false
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  const resendVerification = async (emailAddress: string): Promise<boolean> => {
+    if (!supabase || !emailAddress.trim()) {
+      setAuthError('Enter your college or school email address first.')
+      return false
+    }
+    setAuthLoading(true)
+    setAuthError('')
+    try {
+      const { error: resendError } = await supabase.auth.resend({
+        type: 'signup',
+        email: emailAddress.trim().toLowerCase(),
+        options: { emailRedirectTo: `${window.location.origin}${window.location.pathname}` },
+      })
+      if (resendError) throw resendError
+      setAuthNotice('Verification email sent. Check your inbox and spam folder.')
       return true
     } catch (reason) {
       setAuthError(friendlyAuthError(reason))
@@ -761,6 +793,7 @@ function App() {
     notice={authNotice}
     loading={authLoading}
     onSubmit={authenticate}
+    onResendVerification={resendVerification}
     onModeChange={() => { setAuthError(''); setAuthNotice('') }}
   />
   if (cloudError && loadedForUser !== userId) return <AuthLoadingScreen
@@ -771,9 +804,11 @@ function App() {
   />
   if (loadedForUser !== userId) return <AuthLoadingScreen message="Loading your private timetable…" />
 
-  const displayUserName = typeof session.user.user_metadata.full_name === 'string'
-    ? session.user.user_metadata.full_name
-    : session.user.email ?? 'Account'
+  const displayUserName = typeof session.user.user_metadata.school_name === 'string'
+    ? session.user.user_metadata.school_name
+    : typeof session.user.user_metadata.full_name === 'string'
+      ? session.user.user_metadata.full_name
+      : session.user.email ?? 'Account'
 
   return <div className="app-shell">
     <aside className={`sidebar ${mobileNav ? 'sidebar-open' : ''}`}>

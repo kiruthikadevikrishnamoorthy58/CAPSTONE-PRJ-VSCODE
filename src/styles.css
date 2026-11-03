@@ -433,6 +433,8 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 3px s
 .auth-message svg { flex: 0 0 auto; margin-top: 1px; }
 .auth-error { color: #a94f54; background: #fff0f0; border: 1px solid #f6d9da; }
 .auth-notice { color: #408466; background: #eff9f3; border: 1px solid #d8f0e1; }
+.auth-resend { display: block; margin-top: 7px; padding: 0; border: 0; color: #356f56; background: transparent; font-size: 10px; font-weight: 700; text-decoration: underline; }
+.auth-resend:disabled { cursor: not-allowed; opacity: .6; }
 .auth-setup { flex-direction: column; color: #74620c; background: #fff9e8; border: 1px solid #f4e7b6; }
 .auth-setup strong { font-size: 11px; }
 .auth-setup code { font-size: 10px; }
